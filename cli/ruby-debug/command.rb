@@ -18,7 +18,7 @@ module Debugger
           klass.options[o] = v if klass.options[o].nil?
         end
         commands << klass
-      end
+      end 
 
       def load_commands
         dir = File.dirname(__FILE__)
@@ -43,9 +43,11 @@ module Debugger
         @options ||= {}
       end
     end
+
+    @@display_stack_trace = false
     
-    def initialize(state, printer)
-      @state, @printer = state, printer
+    def initialize(state)
+      @state = state
     end
 
     def match(input)
@@ -53,14 +55,6 @@ module Debugger
     end
 
     protected
-    
-    def method_missing(meth, *args, &block)
-      if @printer.respond_to? meth
-        @printer.send meth, *args, &block
-      else
-        super
-      end
-    end
 
     def print(*args)
       @state.print(*args)
@@ -70,26 +64,33 @@ module Debugger
       @state.confirm(msg) == 'y'
     end
 
-    def debug_eval(str, b = @state.binding)
-      unless b
-        @printer.print_error "Can't evaluate in the current context.\nUse rdebug with -f option, or set Debugger.keep_frame_info = true.\n"
-        throw :debug_error
-      end
+    def debug_eval(str, b = get_binding)
       begin
         val = eval(str, b)
       rescue StandardError, ScriptError => e
-        @printer.print_exception(e, @state.binding)
+        if @@display_stack_trace
+          at = eval("caller(1)", b)
+          print "%s:%s\n", at.shift, e.to_s.sub(/\(eval\):1:(in `.*?':)?/, '')
+          for i in at
+            print "\tfrom %s\n", i
+          end
+        else
+          print "#{e.class} Exception: #{e.message}\n"
+        end
         throw :debug_error
       end
     end
 
     def debug_silent_eval(str)
-      return nil unless @state.binding
       begin
-        eval(str, @state.binding)
+        eval(str, get_binding)
       rescue StandardError, ScriptError
         nil
       end
+    end
+
+    def get_binding
+      @state.context.frame_binding(@state.frame_pos)
     end
 
     def line_at(file, line)
@@ -98,20 +99,7 @@ module Debugger
 
     def get_context(thnum)
       Debugger.contexts.find{|c| c.thnum == thnum}
-    end
-    
-    def get_binding(pos)
-      # returns frame binding of frame pos, if pos is within bound,  @state.binding otherwise
-      return @state.binding unless pos
-      pos = pos.to_i
-      pos -= 1
-      if pos >= @state.context.frames.size || pos < 0 then
-        @printer.print_error("stack frame number must be between 1 and %i, was: %i, using 1.", @state.context.frames.size, pos+1)
-        return @state.binding
-      end
-      @printer.print_msg("Using frame %s for evaluation of variable.", pos)
-      return @state.context.frames[pos].binding
-    end
+    end  
   end
   
   Command.load_commands

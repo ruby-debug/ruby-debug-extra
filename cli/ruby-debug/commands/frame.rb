@@ -3,7 +3,7 @@ module Debugger
     def adjust_frame(frame_pos, absolute)
       if absolute
         if frame_pos < 0
-          abs_frame_pos = @state.frames.size + frame_pos
+          abs_frame_pos = @state.context.stack_size + frame_pos
         else
           abs_frame_pos = frame_pos
         end
@@ -11,45 +11,61 @@ module Debugger
         abs_frame_pos = @state.frame_pos + frame_pos
       end
 
-      if abs_frame_pos >= @state.frames.size then
-        print_error "Adjusting would put us beyond the oldest (initial) frame.\n"
+      if abs_frame_pos >= @state.context.stack_size then
+        print "Adjusting would put us beyond the oldest (initial) frame.\n"
         return
       elsif abs_frame_pos < 0 then
-        print_error "Adjusting would put us beyond the newest (innermost) frame.\n"
+        print "Adjusting would put us beyond the newest (innermost) frame.\n"
         return
       end
       if @state.frame_pos != abs_frame_pos then
         @state.previous_line = nil
         @state.frame_pos = abs_frame_pos
       end
-      frame = @state.frames[-1-@state.frame_pos]
-      @state.binding, @state.file, @state.line = frame.binding, frame.file, frame.line
-      print_current_frame(frame, @state.frame_pos)
+      
+      @state.file = @state.context.frame_file(@state.frame_pos)
+      @state.line = @state.context.frame_line(@state.frame_pos)
+      
+      print_frame(@state.frame_pos, true)
     end
 
     def get_int(str, cmd)
       begin
         return Integer(@match[1])
       rescue
-        print_error "%s argument needs to be a number.\n" % cmd
+        print "%s argument needs to be a number.\n" % cmd
         return nil
       end
     end
 
+    def print_frame(pos, adjust = false)
+      file, line, id = @state.context.frame_file(pos), @state.context.frame_line(pos), @state.context.frame_id(pos)
+      print "#%d %s:%d%s\n", pos, file, line, id ? " in `#{id.id2name}'" : ""
+      print "\032\032%s:%d\n", file, line if ENV['EMACS'] && adjust
+    end
   end
 
   class WhereCommand < Command # :nodoc:
+    include FrameFunctions
+
     def regexp
       /^\s*(?:w(?:here)?|bt|backtrace)$/
     end
 
     def execute
-      print_frames(@state.frames, @state.frame_pos)
+      (0...@state.context.stack_size).each do |idx|
+        if idx == @state.frame_pos
+          print "--> "
+        else
+          print "    "
+        end
+        print_frame(idx)
+      end
     end
 
     class << self
       def help_command
-        %w|where frame|
+        %w|where backtrace|
       end
 
       def help(cmd)
@@ -67,6 +83,8 @@ module Debugger
   end
 
   class UpCommand < Command # :nodoc:
+    include FrameFunctions
+
     def regexp
       /^\s* u(?:p)? (?:\s+(.*))? .*$/x
     end
@@ -83,7 +101,7 @@ module Debugger
 
     class << self
       def help_command
-        up
+        'up'
       end
 
       def help(cmd)
@@ -95,8 +113,10 @@ module Debugger
   end
 
   class DownCommand < Command # :nodoc:
+    include FrameFunctions
+
     def regexp
-      /^\s* d(?:own)? (?:\s+(.*))? .*$/x
+      /^\s* down (?:\s+(.*))? .*$/x
     end
 
     def execute
@@ -136,7 +156,7 @@ module Debugger
         pos = get_int(@match[1], "Frame")
         return unless pos
       end
-      adjust_frame(pos < 0 ? pos : pos-1, true)
+      adjust_frame(pos, true)
     end
 
     class << self
