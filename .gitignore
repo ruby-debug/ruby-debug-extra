@@ -11,5 +11,3 @@ configure
 elisp-comp
 install-sh
 missing
-pkg
-ruby-debug-*.tar.gz
